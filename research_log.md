@@ -11,7 +11,7 @@ week 7.
 **Entry template:**
 
 ```
-## work - n
+## Task - n
 
 **Goal:**
 **Done:**
@@ -23,7 +23,7 @@ week 7.
 
 ---
 
-## Work - 1
+## Task - 1
 
 **Goal:** Clear the first fatal-if-false assumption — can we obtain and run
 π0.5 at all?
@@ -109,11 +109,105 @@ openpi's main one.
 
 ---
 
-## Work - 2
+## Task 2 — 
 
-**Goal:**
+**Goal:** Repo created, files committed.
+
+**Done:** Repo `pi05-spatial-probing` created with `PROJECT_PLAN.md`,
+`SETUP.md`, `research_log.md`, `setup_kaggle.sh`, `.gitignore`,
+`scripts/test_infer.py`.
+
+**Decisions:** Switched from day-numbering to **task-numbering** (T1, T2, ...).
+Calendar retained in `PROJECT_PLAN.md` to track slippage.
+
+**Next:** T3 — LIBERO install and headless rendering.
+
+**Phase status:** P1 · day 2 of 50 · ahead of schedule.
+
+---
+
+## Task 3 - 
+
+**Goal:** LIBERO installed, headless rendering working, one frame saved.
+
 **Done:**
-**Blocked / issues:**
+- Read `examples/libero/README.md`. Confirmed **two-environment architecture**:
+  LIBERO runs in its own Python 3.8 venv, policy served separately over a
+  socket. Docker path is "recommended" but unusable on Kaggle (no
+  docker-compose, `xhost` needs a display) — used the "without Docker" path.
+- LIBERO ships as a **submodule** at `third_party/libero` (no separate clone).
+- Installed rendering libs: `libegl1 libgl1-mesa-glx libosmesa6-dev
+  libglew-dev patchelf`.
+- Created `examples/libero/.venv` on **Python 3.8.20** via uv; synced
+  requirements with `--extra-index-url .../cu113 --index-strategy=unsafe-best-match`.
+  Installed `openpi-client` and `third_party/libero` into it.
+- **Rendered a frame successfully with `MUJOCO_GL=egl`.**
+- Ran on **CPU session** — no GPU needed for rendering, saves quota.
+
+**Blocked / issues (resolved):**
+1. Pasted `setup_kaggle.sh` contents into a Python cell -> `SyntaxError`.
+   Shell scripts need `%%writefile` + `!bash`, or a `%%bash` cell.
+2. LIBERO's first import **prompts interactively** for a dataset path and hangs
+   in a notebook. -> `echo "N" | <python> script.py`. Config is then written to
+   `/root/.libero/config.yaml`. Recurs every fresh session.
+3. `PYTHONPATH=... echo "N" | python` attached the env var to `echo`, not
+   python -> `ModuleNotFoundError: No module named 'libero'`.
+   -> Set `sys.path.insert(0, ".../third_party/libero")` **inside the script**
+   instead. More robust; use this pattern going forward.
+
 **Numbers / facts learned:**
-**Decisions:**
-**Next:**
+- Installed: robosuite 1.4.1, mujoco 3.2.3, libero 0.1.0, numpy 1.22.4,
+  torch 1.11.0+cu113
+- Benchmark reference (from README) — π0.5 @ 30k: Spatial 98.8, Object 98.2,
+  Goal 98.0, Libero-10 92.4, **avg 96.85**. Use as the T5 sanity target.
+- `datasets path does not exist` warning is **harmless** — demo datasets are
+  for training only; simulator + BDDL files suffice.
+
+**Next:** T5 — closed-loop rollouts.
+
+**Phase status:** P1 · T3 complete.
+
+---
+
+## Task 4 — 
+
+**Goal:** (fatal-if-false) Can ground-truth object poses be extracted from the
+simulator? If not, the whole labelling approach needs redesign.
+
+**Result: CLEARED.** Object poses are exposed **directly in the observation
+dict** — no MuJoCo internals required.
+
+**Done:**
+- Dumped all observation keys (see `docs/conventions.md` §1).
+- Verified the frame convention of `_to_robot0_eef_pos`: it is
+  `R.T @ (p_obj - p_eef)` in the **gripper frame**, matched to 7 decimals.
+  -> **Decision:** do not use as a probe target; compute world-frame
+  differences in `labels/` instead.
+- **Found the image-orientation issue** (see `docs/conventions.md` §3):
+  raw render is upside down; openpi applies `[::-1, ::-1]` — a **180°
+  rotation** — at `main.py:115-116` before the model sees it.
+  -> Label transform: `u_model = W-1-u`, `v_model = H-1-v`.
+
+**Why this matters:** this is the fragile link in the measurement chain. Wrong
+pixel labels raise **no error** — the probe would simply appear to fail, and
+the cause would be near-undiagnosable. Found on day 2 instead of week 5.
+
+**Numbers / facts learned:**
+- World frame origin is not the table: bowl z = 0.97, eef z = 1.17.
+  **TODO:** record table surface height before defining "above" relations.
+- `robot0_proprio-state` is (39,) but the model takes (8,).
+  **TODO:** identify which 8 components openpi selects.
+- `*_to_robot0_eef_*` fields are derived from `_pos`/`_quat` — not independent
+  information.
+
+**Open TODOs:**
+- [ ] Check `args.resize_size` in `main.py` — does `resize_with_pad` ever pad?
+- [ ] Identify the 8-dim state subset
+- [ ] Record table surface height
+- [ ] Confirm the 7-dim action ordering in `LiberoOutputs`
+
+**Next:** T5 — closed-loop rollouts with π0.5 driving (needs GPU + both
+environments talking over the socket).
+
+**Phase status:** P1 · **both fatal-if-false assumptions cleared** ·
+day 2 of 50, T1–T4 done.

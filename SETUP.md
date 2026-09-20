@@ -230,6 +230,11 @@ Commit as `setup_kaggle.sh`; run it as cell one of every session.
 
 ```bash
 #!/bin/bash
+#!/bin/bash
+# Cold-start setup for pi05-spatial-probing on Kaggle.
+# Usage:
+#   bash setup_kaggle.sh          # openpi only (GPU work)
+#   bash setup_kaggle.sh libero   # openpi + LIBERO sim env (CPU work is fine)
 set -e
 
 pip install -q uv
@@ -239,17 +244,36 @@ if [ ! -d openpi ]; then
   git clone --recurse-submodules https://github.com/Physical-Intelligence/openpi.git
 fi
 cd openpi
+git submodule update --init --recursive
 
+# ---- openpi env (Python 3.11) ----
 GIT_LFS_SKIP_SMUDGE=1 uv sync
 GIT_LFS_SKIP_SMUDGE=1 uv pip install -e .
 
-# gsutil composite-object download fix
+# gsutil composite-object download fix (checkpoint fails without this)
 cat > /root/.boto <<'EOF'
 [GSUtil]
 check_hashes = never
 EOF
 
 uv run python -c "import jax; print('JAX devices:', jax.devices())"
+
+# ---- LIBERO env (Python 3.8) ----
+if [ "$1" == "libero" ]; then
+  apt-get update -qq
+  apt-get install -y -qq libegl1 libgl1-mesa-glx libosmesa6-dev libglew-dev patchelf
+
+  uv venv --python 3.8 examples/libero/.venv
+  uv pip sync examples/libero/requirements.txt third_party/libero/requirements.txt \
+    --extra-index-url https://download.pytorch.org/whl/cu113 \
+    --index-strategy=unsafe-best-match \
+    --python examples/libero/.venv/bin/python
+  uv pip install -e packages/openpi-client --python examples/libero/.venv/bin/python
+  uv pip install -e third_party/libero    --python examples/libero/.venv/bin/python
+
+  echo "LIBERO env ready. NOTE: first run prompts for a dataset path -> pipe 'N'."
+fi
+
 echo "Setup complete."
 ```
 
@@ -270,6 +294,111 @@ Usage:
 > to be read without being updated. Only ever do this inside `.venv`.
 
 ---
+
+---
+
+## 9. LIBERO simulator (separate environment)
+
+LIBERO runs in its **own Python 3.8 venv**, isolated from openpi's 3.11
+environment. This is intentional — their dependencies conflict. The intended
+architecture is two processes talking over a socket: simulator client +
+policy server.
+
+**Docker is the officially recommended path but does not work on Kaggle**
+(no docker-compose, and `xhost +local:docker` needs a display). Use the
+"without Docker" path below.
+
+**Rendering needs no GPU** — run T3/T4-type work on a **CPU session** to save
+GPU quota.
+
+### 9.1 System libraries
+
+```python
+!apt-get update -qq && apt-get install -y -qq \
+  libegl1 libgl1-mesa-glx libosmesa6-dev libglew-dev patchelf
+```
+
+### 9.2 Submodule
+
+LIBERO ships as a submodule at `third_party/libero` — do not clone separately.
+
+```python
+%cd /kaggle/working/openpi
+!git submodule update --init --recursive
+```
+
+### 9.3 LIBERO venv (Python 3.8)
+
+```python
+!pip install -q uv
+%cd /kaggle/working/openpi
+!uv venv --python 3.8 examples/libero/.venv
+!examples/libero/.venv/bin/python --version     # expect 3.8.20
+
+!uv pip sync examples/libero/requirements.txt third_party/libero/requirements.txt \
+  --extra-index-url https://download.pytorch.org/whl/cu113 \
+  --index-strategy=unsafe-best-match \
+  --python examples/libero/.venv/bin/python
+!uv pip install -e packages/openpi-client --python examples/libero/.venv/bin/python
+!uv pip install -e third_party/libero    --python examples/libero/.venv/bin/python
+```
+
+`--python <path>` is required in notebooks — `source activate` does not persist
+across cells.
+
+Expect: robosuite 1.4.1, mujoco 3.2.3, libero 0.1.0, torch 1.11.0+cu113.
+
+**Harmless warnings:** `incompatible with the project's Python requirement
+>=3.11` (that is the point of a separate venv) and `Failed to hardlink files`
+(Kaggle filesystem quirk).
+
+### 9.4 The interactive-prompt trap
+
+On first import LIBERO **prompts for a dataset path and hangs** in a notebook
+cell (no stdin). Answer `N`:
+
+```python
+!echo "N" | /kaggle/working/openpi/examples/libero/.venv/bin/python <script>.py
+```
+
+Config is written to `/root/.libero/config.yaml`. **This recurs every session.**
+
+The `[Warning]: datasets path ... does not exist!` that follows is **harmless**
+— those are demonstration datasets for training; the simulator and BDDL files
+are all we need.
+
+### 9.5 Running LIBERO scripts (use this pattern)
+
+Set `sys.path` **inside the script**, not via a shell `PYTHONPATH` export —
+the export binds to the wrong command when piping `echo "N"`.
+
+```python
+import os, sys
+os.environ["MUJOCO_GL"] = "egl"          # must be set BEFORE any import
+sys.path.insert(0, "/kaggle/working/openpi/third_party/libero")
+```
+
+Then:
+
+```python
+!echo "N" | /kaggle/working/openpi/examples/libero/.venv/bin/python /kaggle/working/<script>.py
+```
+
+If EGL fails, the README recommends `MUJOCO_GL=glx` as the fallback.
+
+### 9.6 Benchmark reference (π0.5 @ 30k, fine-tuned)
+
+| Spatial | Object | Goal | Libero-10 | Average |
+|---|---|---|---|---|
+| 98.8 | 98.2 | 98.0 | 92.4 | **96.85** |
+
+Use as the sanity target for T5 rollouts.
+
+### 9.7 ⚠️ Conventions
+
+**Read `docs/conventions.md` before writing any label code.** The image
+orientation issue there (openpi applies a 180° rotation before the model sees
+the frame) will silently corrupt every pixel label if missed.
 
 ## Troubleshooting
 

@@ -19,3 +19,9 @@ Course project — Mathematical Foundations of Robotics.
 
 ## Status
 Phase 1 — environment setup. π0.5 inference reproduced on Kaggle (T4).
+
+## Status
+Phase P1 — environment setup. **T1–T4 complete** (day 2 of 50).
+π0.5 inference reproduced on Kaggle; LIBERO simulator rendering headlessly;
+ground-truth object poses confirmed accessible. Both fatal-if-false
+assumptions cleared. Next: T5 — closed-loop rollouts.
