@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.venv/
+.ipynb_checkpoints/
+.DS_Store           # you're on a Mac
+*.npy
+*.h5
+*.zarr/
+data/
+outputs/
+checkpoints/
+wandb/
